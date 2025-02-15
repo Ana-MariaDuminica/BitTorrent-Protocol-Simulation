@@ -1,0 +1,182 @@
+/*Duminica Ana-Maria - Tema2 Protocolul BitTorrent - APD*/
+
+    PROTOCOLUL BitTorrent
+BitTorrent este un protocol de partajare peer-to-peer utilizat pentru 
+distribuirea descentralizata a fisierelor. Spre deosebire de metodele 
+traditionale de descarcare, BitTorrent nu depinde de un server central unic, ci 
+permite utilizatorilor sa descarce simultan segmente ale unui fisier de la mai 
+multe noduri, ceea ce asigura viteze mai mari de transfer si eficienta crescuta.
+
+Un tracker BitTorrent coordoneaza schimbul de date, furnizeaza informatii despre 
+fisierele disponibile si ajuta clientii sa gaseasca alti peers de la care pot 
+descarca segmentele fisierelor, Fisierele partajate sunt impartite in segmente 
+de dimensiuni egale. Pe masura ce un client primeste un segment, acesta devine 
+disponibil pentru a fi transmis catre alti utlizatori.
+
+    ROLUL TRACKER-ULUI
+Tracker-ul este responsabil de:
+-- Construirea si actualizarea swarm-urilor pentru fiecare fisier.
+-- Raspunsul la cererile de swarm-uri venite de la peers.
+-- Gestionarea notificarilor de descarcare completa a fisierelor si a 
+descarcarilor totale finalizate.
+-- Finalizarea executiei atunci cand toti peers au terminat descarcarile.
+
+    ROLUL CLIENTULUI
+Fiecare client are doua thread-uri principale:
+-- Thread-ul de descarcare – Solicita segmentele fisierelor dorite de la alti 
+peers, selectand peer-ul optim pe baza incarcarii acestuia.
+-- Thread-ul de upload – Raspunde cererilor de segmente venite de la alti peers 
+si trimite segmentele solicitate daca le detine.
+-- Peer-ul mentine informatii despre:
+    Fisierele pe care le detine integral.
+    Fisierele pe care le descarca partial.
+    Fisierele pe care doreste sa le descarce.
+    Incarcarea curenta reprezentand numarul de operatiuni active de upload si 
+    download.
+
+    TAG-URILE DE MESAJE
+Tag-urile reprezinta identificatori unici pentru tipurile de mesaje trimise de 
+tracker si clienti:
+-- TAG_SWARM_REQUEST (1) si TAG_SWARM_RESPONSE (2): clientul solicita lista de 
+swarm-ul unui fisier si tracker-ul raspunde.
+-- TAG_SEGMENT_REQUEST (3) si TAG_SEGMENT_RESPONSE (4): clientul solicita un 
+segment al unui fisier de la un peer/seed si acesta ii raspunde la cererea de 
+segment.
+-- TAG_FILE_COMPLETE (5): clientul informeaza tracker-ul ca a descarcat complet 
+un fisier.
+-- TAG_DOWNLOAD_COMPLETE (6): clientul informeaza tracker-ul ca a terminat toate 
+descarcarile.
+-- TAG_FINALIZE (7): tracker-ul informeaza clientii ca descarcarile s-au 
+finalizat.
+-- TAG_UPLOAD_TERMINATE (8): semnal pentru terminarea thread-ului de upload al 
+unui client.
+-- TAG_LOAD_REQUEST (9) si TAG_LOAD_RESPONSE (10): peer-ul raspunde cu valoarea 
+starii de aglomeratie curente.
+TAG_SEGMENT_AVAILABILITY_REQUEST (11) si TAG_SEGMENT_AVAILABILITY_RESPONSE (12):
+clientul intreaba un peer daca detine un anumit segment si peer-ul raspunde.
+
+    STRUCTURI
+-- Structura Segment reprezinta un bloc dintr-un fisier, identificat prin pozitia 
+sa in fisier si hash-ul caracteristic.
+-- Structura File reprezinta un fisier impartit in segmente si contine, de 
+asemenea, si numele fisierului, numarul de segmente si array-ul de segmente.
+-- Structura ClientInfo contine informatii despre un client: fisierele pe care 
+le detine complet si le poate partaja, fisierele pe care doreste sa le descarce, 
+fisierele descarcate partial, care pot fi completate.
+-- Structura FileSwarm descrie swarm-ul unui fisier, adica clientii care detin 
+segmente ale fisierului respectiv. Aceasta informatie este gestionata de tracker 
+si trimisa catre clienti atunci cand acestia solicita swarm-ul unui fisier.
+-- Structura TrackerInfo este utilizata de tracker pentru a tine evidenta 
+fisierelor si clientilor care au terminat de descarcat.
+-- Structura ThreadArgs este folosita pentru a transmite argumentele necesare 
+functiilor care ruleaza in thread-urile de download si upload: rangul clientului, 
+pointer la structura ClientInfo, mutex pentru sincronizarea accesului la 
+current_load, care reprezinta numarul de operatiuni active ale clientului.
+
+    FUNCTIILE
+1. parse_input_file -- Aceasta functie are rolul de a intializa structura 
+ClientInfo citind datele dintr-un fisier de intrare. Fisierul de intrare 
+specifica fisierele detinute integral de client, numarul de segmente ale 
+fiecarui fisier si fisierele dorite pentru descarcare.
+
+2. initialize_downloaded_file -- Functia initializeaza un fisier descarcat 
+partial, adaugandu-l in lista de fisiere descarcate daca nu exista deja.
+
+3. add_segment_to_downloaded_file -- Adauga un segment nou la un fisier 
+descarcat partial
+
+4. add_client_to_swarm -- Functia adauga un client nou intr-un swarm, daca 
+acesta nu era deja prezent
+
+5. add_file_to_tracker -- Aceasta functie adauga un fisier nou la tracker, daca 
+fisierul nu exista deja 
+
+6. request_swarm_from_tracker -- Functia solicita de la tracker swarm-urile 
+fisierelor dorite de client. Salveaza swarm-ul primit in local_swarms
+
+7. update_swarm -- Functia actualizeaza un swarm al unui fisier, solicitand 
+tracker-ului informatii actualizate despre acesta 
+
+8. is_segment_downloaded -- Functia verifica daca un segment a fost deja 
+descarcat
+
+9. save_file_in order -- Functia salveaza un fisier descarcat, sortand segmentele 
+in ordine inainte de scriere.
+
+10. download_thread_func -- Este functia executata de un threaad creat de un 
+client, care se ocupa de descarcarea fisierelor dorite de la alti clienti din 
+retea. Aceasta solicita informatii despre swarm-uri de la tracker, alege cei mai 
+potriviti peer-i pentru descarcare si adauga segmentele descarcate in fisierele 
+locale ale clientului. Functia incepe prin extragerea informatiilor necesare din 
+structura ThreadArgs. Se initializeaza un array pentru swarm-urile locale si un 
+contor pentru numarul de swarm-uri primite. Daca clientul nu doreste sa descarce 
+fisiere, se trimite un mesaj de finalizare a descarcarii catre tracker si 
+thread-ul se termina. Functia request_swarm_from_tracker este apelata pentru a 
+solicita tracker-ului informatiile necesare despre fisierele dorite. Pentru 
+fiecare fisier dorit, se initializeaza un fisier descarcat partial folosind 
+initialize_downloaded_file. Se cauta swarm-ul care corespunde fisierului dorit.
+Se parcurge fiecare segment al fisierului dorit si se verifica daca a fost deja 
+descarcat. Daca segmentul a fost deja descarcat, se trece la urmatorul segment.
+Se parcurg toti peer-ii care detin segmente din swarm-ul curent si se trimite o 
+cerere de disponibilitate pentru segmentul dorit. Daca peer-ul are segmentul, se 
+trimite o cerere pentru a afla cat de aglomerat este clientul. Peer-ul cel mai 
+liber este selectat ca fiind cel mai optim pentru descarcarea segmentului. Daca 
+s-a gasit un peer ptim, se trimite cererea de descarcare. Dupa primirea 
+raspunsului, daca raspunsul este ACK, segmentul este adaugat la fisierul 
+descarcat partial. Contorul este actualizat, iar dupa descarcarea a 10 segmente, 
+se solicita o actualizare a swarm-ului. Dupa descarcarea tuturor segmentelor, 
+fisierul este salvat folosind save_file_in_order, iar tracker-ul este notificat 
+ca fisierul a fost complet descarcat. La final, tracker-ul este notificat ca 
+toate descarcarile au fost finalizate, iar thread-ul se inchide. 
+
+11. tracker_handle_file_complete -- Aceasta functie gestioneaza notificarea 
+trimisa de un client catre tracker atunci cand un fisier a fost complet 
+descarcat.
+
+12. tracker_handle_download_complete -- Aceasta functie gestioneaza notificarile 
+de finalizare a descarcarii tuturor fisierelor trimise de clienti catre tracker. 
+In momentul in care toate descarcarile s-au finalizat, se trimite semnalul de 
+finalizare catre toti clientii. 
+
+13. upload_thread_func -- Aceasta functie este executata de un thread creat de 
+un client si gestioneaza cererile de upload primite de la alti clienti care 
+descarca segmente. Asculta cererile de upload, determina daca clientul detine 
+segmentul cerut si trimite segmentul catre clientul care l-a solicitat. 
+Se verifica daca exista mesaje si se gestioneaza mesajele primite in functie de 
+tipul lor: 
+TAG_UPLOAD_TERMINATE - cand clientul primeste un semnal de terminare a 
+upload-ului, thread-ul se inchide.
+TAG_SEGMENT_REQUEST - cand primeste o cerere de segment, clientul verifica daca 
+detine segmentul respectiv, trimite un raspuns ACK daca segmentul este 
+disponibil si actualizeaza sarcina curenta folosind un mutex.
+TAG_SEGMENT_AVAILABILITY_REQUEST - raspunde la cererile de disponibilitate a 
+segmentelor. Daca segmentul este disponibil, trimite mesajul HAS_SEGMENT, altfel 
+trimite NO_SEGMENT.
+TAG_LOAD_REQUEST - trimite sarcina curenta a clientului catre cel care a 
+solicitat-o.
+
+14. find_swarm_by_filename -- Aceasta functie cauta un swarm asociat unui fisier 
+in structura TrackerInfo. 
+
+15. tracker_handle_swarm_request -- Aceasta functie gestioneaza cererile de 
+swarm primite de la clienti. Trimite informatiile despre swarm-ul unui fisier 
+cerut de un client si adauga clientul in swarm, daca nu este deja prezent.
+
+16. tracker_initialize -- Aceasta functie intializeaza tracker-ul, primind 
+informatiile despre fisierele detinute de fiecare client. Construieste 
+swarm-urile intiale pe baza fisierelor detinute de clienti si sincronizeaza 
+inceputul descarcarilor printr-o bariera MPI.
+
+17. tracker -- Aceasta este functia principala a tracker-ului. Gestioneaza 
+intreaga logica a tracker-ului, inclusiv initializarea, gestionarea cererilor 
+de swarm si gestionarea notificarilor de finalizare a descarcarii. 
+
+18. peer -- Functia reprezinta punctul de intrare pentru fiecare client intr-un 
+sistem peer-to-peer. Aceasta initializeaza clientul, comunica cu tracker-ul 
+pentru a furniza informatiile despre fisierele pe care le detine, creeeaza 
+thread-uri pentru descarcare si upload si gestioneaza sincronizarea si 
+finalizarea proceselor de descarcare si partajare a fisierelor. 
+
+In concluzie, acest proiect simuleaza protocolul BitTorrent, utilizand 
+comunicarea MPI pentru a coordona descarcarea si partajarea fisierelor intre 
+mai multi clienti.
